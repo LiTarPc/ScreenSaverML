@@ -477,14 +477,14 @@ namespace ScreenshotSaver
         {
             ScreenshotImage.Source = source;
 
-            MainGrid.Width = source.PixelWidth;
-            MainGrid.Height = source.PixelHeight;
-            DrawingCanvas.Width = source.PixelWidth;
-            DrawingCanvas.Height = source.PixelHeight;
-            ShapesCanvas.Width = source.PixelWidth;
-            ShapesCanvas.Height = source.PixelHeight;
-            CropCanvas.Width = source.PixelWidth;
-            CropCanvas.Height = source.PixelHeight;
+            MainGrid.Width = source.Width;
+            MainGrid.Height = source.Height;
+            DrawingCanvas.Width = source.Width;
+            DrawingCanvas.Height = source.Height;
+            ShapesCanvas.Width = source.Width;
+            ShapesCanvas.Height = source.Height;
+            CropCanvas.Width = source.Width;
+            CropCanvas.Height = source.Height;
 
             ClearDrawings();
             ApplyZoom(1.0); // Reset zoom to native on load
@@ -734,7 +734,7 @@ namespace ScreenshotSaver
 
                 if (width > 10 && height > 10)
                 {
-                    PerformCrop(new Int32Rect((int)x, (int)y, (int)width, (int)height));
+                    PerformCrop(new Rect(x, y, width, height));
                 }
 
                 RbPen.IsChecked = true;
@@ -765,35 +765,49 @@ namespace ScreenshotSaver
             var source = ScreenshotImage.Source as BitmapSource;
             if (source == null) throw new InvalidOperationException("No image loaded");
 
-            int width = source.PixelWidth;
-            int height = source.PixelHeight;
-
             var drawingVisual = new DrawingVisual();
             using (var drawingContext = drawingVisual.RenderOpen())
             {
-                // Draw background image at native scale
-                drawingContext.DrawImage(source, new Rect(0, 0, width, height));
+                // Draw background image at native DIP scale
+                drawingContext.DrawImage(source, new Rect(0, 0, source.Width, source.Height));
 
-                // Draw drawings (strokes) at native scale
+                // Draw drawings (strokes) at native DIP scale
                 foreach (var stroke in DrawingCanvas.Strokes)
                 {
                     stroke.Draw(drawingContext);
                 }
             }
 
-            var renderTarget = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+            var renderTarget = new RenderTargetBitmap(source.PixelWidth, source.PixelHeight, source.DpiX, source.DpiY, PixelFormats.Pbgra32);
             renderTarget.Render(drawingVisual);
             return renderTarget;
         }
 
-        private void PerformCrop(Int32Rect cropRect)
+        private void PerformCrop(Rect cropRectDips)
         {
             CropCanvas.Visibility = Visibility.Collapsed;
 
             try
             {
                 var renderedSource = RenderEditedImage();
-                var croppedBitmap = new CroppedBitmap(renderedSource, cropRect);
+
+                double dpiScaleX = renderedSource.DpiX / 96.0;
+                double dpiScaleY = renderedSource.DpiY / 96.0;
+
+                int pixelX = (int)Math.Round(cropRectDips.X * dpiScaleX);
+                int pixelY = (int)Math.Round(cropRectDips.Y * dpiScaleY);
+                int pixelWidth = (int)Math.Round(cropRectDips.Width * dpiScaleX);
+                int pixelHeight = (int)Math.Round(cropRectDips.Height * dpiScaleY);
+
+                pixelX = Math.Max(0, pixelX);
+                pixelY = Math.Max(0, pixelY);
+                pixelWidth = Math.Min(pixelWidth, renderedSource.PixelWidth - pixelX);
+                pixelHeight = Math.Min(pixelHeight, renderedSource.PixelHeight - pixelY);
+
+                if (pixelWidth <= 0 || pixelHeight <= 0) return;
+
+                var cropRectPixels = new Int32Rect(pixelX, pixelY, pixelWidth, pixelHeight);
+                var croppedBitmap = new CroppedBitmap(renderedSource, cropRectPixels);
 
                 PushStateToHistory(); // Save undo state before replacing current image
                 LoadImageIntoUI(croppedBitmap);
